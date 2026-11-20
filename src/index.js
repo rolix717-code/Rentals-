@@ -14,10 +14,30 @@ const read=async r=>{try{return await r.json()}catch{return {}}};
 const n=x=>Number.isFinite(Number(x))?Number(x):0;
 async function api(r,e){
  let u=new URL(r.url),p=u.pathname,m=r.method,b;
+ if(!e.SESSION_SECRET || String(e.SESSION_SECRET).length < 32) return err("Server is not configured: SESSION_SECRET must contain at least 32 characters.",503);
  if(p==="/api/health")return j({ok:true});
- if(p==="/api/auth/register"&&m==="POST"){b=await read(r);let name=String(b.name||"").trim(),email=String(b.email||"").trim().toLowerCase(),pw=String(b.password||"");if(name.length<2||!email.includes("@")||pw.length<8)return err("Enter your name, valid email and password of at least 8 characters.");try{let q=await e.DB.prepare("INSERT INTO users(name,email,phone,password_hash) VALUES(?,?,?,?)").bind(name,email,b.phone||"",await hash(pw)).run(),user={id:q.meta.last_row_id,name,email};return j({user},201,{"set-cookie":ck(await session(user,e))})}catch{return err("Email already registered.",409)}}
- if(p==="/api/auth/login"&&m==="POST"){b=await read(r);let x=await e.DB.prepare("SELECT * FROM users WHERE email=?").bind(String(b.email||"").toLowerCase()).first();if(!x)return err("Incorrect email or password.",401);let [salt]=x.password_hash.split("."),v=await hash(String(b.password||""),salt);if(v!==x.password_hash)return err("Incorrect email or password.",401);let user={id:x.id,name:x.name,email:x.email};return j({user},200,{"set-cookie":ck(await session(user,e))})}
- if(p==="/api/auth/logout")return j({ok:true},200,{"set-cookie":ck("")});
+ if(p==="/api/auth/register"&&m==="POST"){
+  b=await read(r);
+  let name=String(b.name||"").trim(),email=String(b.email||"").trim().toLowerCase(),pw=String(b.password||"");
+  if(name.length<2||!email.includes("@")||pw.length<8)return err("Enter your name, valid email and password of at least 8 characters.");
+  try {
+   // Check duplicates explicitly so unrelated D1/crypto errors are never mislabeled.
+   let existing=await e.DB.prepare("SELECT id FROM users WHERE email=? LIMIT 1").bind(email).first();
+   if(existing)return err("This email is already registered. Please sign in instead.",409);
+   let passwordHash=await hash(pw);
+   let q=await e.DB.prepare("INSERT INTO users(name,email,phone,password_hash) VALUES(?,?,?,?)").bind(name,email,String(b.phone||""),passwordHash).run();
+   let user={id:q.meta.last_row_id,name,email};
+   let token=await session(user,e);
+   return j({user},201,{"set-cookie":ck(token)});
+  } catch(error) {
+   console.error("HIZWAY_REGISTER_ERROR",error?.stack||error?.message||String(error));
+   let message=String(error?.message||"");
+   if(/UNIQUE constraint failed: users\.email/i.test(message))return err("This email is already registered. Please sign in instead.",409);
+   return err("Registration could not be completed because of a server/database error. Check the Worker logs for HIZWAY_REGISTER_ERROR.",500);
+  }
+ }
+ if(p==="/api/auth/login"&&m==="POST"){b=await read(r);let x=await e.DB.prepare("SELECT * FROM users WHERE email=?").bind(String(b.email||"").trim().toLowerCase()).first();if(!x)return err("Incorrect email or password.",401);let [salt]=x.password_hash.split("."),v=await hash(String(b.password||""),salt);if(v!==x.password_hash)return err("Incorrect email or password.",401);let user={id:x.id,name:x.name,email:x.email};return j({user},200,{"set-cookie":ck(await session(user,e))})}
+ if(p==="/api/auth/logout"&&m==="POST")return j({ok:true},200,{"set-cookie":ck("")});
  let user=await who(r,e);if(!user)return err("Please sign in again.",401);
  if(p==="/api/auth/me")return j({user});
  if(p==="/api/dashboard"){let month=new Date().toISOString().slice(0,7)+"-01",q=async(sql,...a)=>e.DB.prepare(sql).bind(...a).first();
