@@ -6,7 +6,8 @@ const err=(m,s=400)=>j({error:m},s),te=new TextEncoder();
 const b64=x=>btoa(String.fromCharCode(...new Uint8Array(x))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 const un64=x=>Uint8Array.from(atob(x.replace(/-/g,"+").replace(/_/g,"/")+"===".slice((x.length+3)%4)),c=>c.charCodeAt(0));
 async function mac(secret,x){let k=await crypto.subtle.importKey("raw",te.encode(secret),{name:"HMAC",hash:"SHA-256"},false,["sign"]);return b64(await crypto.subtle.sign("HMAC",k,te.encode(x)))}
-async function hash(p,s=b64(crypto.getRandomValues(new Uint8Array(16)))){let k=await crypto.subtle.importKey("raw",te.encode(p),"PBKDF2",false,["deriveBits"]);let z=await crypto.subtle.deriveBits({name:"PBKDF2",salt:un64(s),iterations:150000,hash:"SHA-256"},k,256);return s+"."+b64(z)}
+// Cloudflare Workers WebCrypto supports PBKDF2 iteration counts up to 100,000.
+async function hash(p,s=b64(crypto.getRandomValues(new Uint8Array(16)))){let k=await crypto.subtle.importKey("raw",te.encode(p),"PBKDF2",false,["deriveBits"]);let z=await crypto.subtle.deriveBits({name:"PBKDF2",salt:un64(s),iterations:100000,hash:"SHA-256"},k,256);return s+"."+b64(z)}
 async function session(u,env){let p=b64(te.encode(JSON.stringify({...u,exp:Date.now()+6048e5})));return p+"."+await mac(env.SESSION_SECRET,p)}
 async function who(r,env){let c=r.headers.get("Cookie")||"",v=c.split(";").map(x=>x.trim()).find(x=>x.startsWith("hizway="))?.slice(7);if(!v)return null;let [p,s]=v.split(".");if(!p||s!==await mac(env.SESSION_SECRET,p))return null;try{let u=JSON.parse(new TextDecoder().decode(un64(p)));return u.exp>Date.now()?u:null}catch{return null}}
 const ck=v=>`hizway=${v}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${v?604800:0}`;
@@ -16,7 +17,26 @@ async function api(r,e){
  let u=new URL(r.url),p=u.pathname,m=r.method,b;
  if(!e.SESSION_SECRET || String(e.SESSION_SECRET).length < 32) return err("Server is not configured: SESSION_SECRET must contain at least 32 characters.",503);
  if(p==="/api/health")return j({ok:true});
- if(p==="/api/auth/register"&&m==="POST"){b=await read(r);let name=String(b.name||"").trim(),email=String(b.email||"").trim().toLowerCase(),pw=String(b.password||"");if(name.length<2||!email.includes("@")||pw.length<8)return err("Enter your name, valid email and password of at least 8 characters.");try{let q=await e.DB.prepare("INSERT INTO users(name,email,phone,password_hash) VALUES(?,?,?,?)").bind(name,email,b.phone||"",await hash(pw)).run(),user={id:q.meta.last_row_id,name,email};return j({user},201,{"set-cookie":ck(await session(user,e))})}catch{return err("Email already registered.",409)}}
+ if(p==="/api/auth/register"&&m==="POST"){
+  b=await read(r);
+  let name=String(b.name||"").trim(),email=String(b.email||"").trim().toLowerCase(),pw=String(b.password||"");
+  if(name.length<2||!email.includes("@")||pw.length<8)return err("Enter your name, valid email and password of at least 8 characters.");
+  try {
+   // Check duplicates explicitly so unrelated D1/crypto errors are never mislabeled.
+   let existing=await e.DB.prepare("SELECT id FROM users WHERE email=? LIMIT 1").bind(email).first();
+   if(existing)return err("This email is already registered. Please sign in instead.",409);
+   let passwordHash=await hash(pw);
+   let q=await e.DB.prepare("INSERT INTO users(name,email,phone,password_hash) VALUES(?,?,?,?)").bind(name,email,String(b.phone||""),passwordHash).run();
+   let user={id:q.meta.last_row_id,name,email};
+   let token=await session(user,e);
+   return j({user},201,{"set-cookie":ck(token)});
+  } catch(error) {
+   console.error("HIZWAY_REGISTER_ERROR",error?.stack||error?.message||String(error));
+   let message=String(error?.message||"");
+   if(/UNIQUE constraint failed: users\.email/i.test(message))return err("This email is already registered. Please sign in instead.",409);
+   return err("Registration could not be completed because of a server/database error. Check the Worker logs for HIZWAY_REGISTER_ERROR.",500);
+  }
+ }
  if(p==="/api/auth/login"&&m==="POST"){b=await read(r);let x=await e.DB.prepare("SELECT * FROM users WHERE email=?").bind(String(b.email||"").trim().toLowerCase()).first();if(!x)return err("Incorrect email or password.",401);let [salt]=x.password_hash.split("."),v=await hash(String(b.password||""),salt);if(v!==x.password_hash)return err("Incorrect email or password.",401);let user={id:x.id,name:x.name,email:x.email};return j({user},200,{"set-cookie":ck(await session(user,e))})}
  if(p==="/api/auth/logout"&&m==="POST")return j({ok:true},200,{"set-cookie":ck("")});
  let user=await who(r,e);if(!user)return err("Please sign in again.",401);
