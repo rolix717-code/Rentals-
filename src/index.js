@@ -6,7 +6,8 @@ const err=(m,s=400)=>j({error:m},s),te=new TextEncoder();
 const b64=x=>btoa(String.fromCharCode(...new Uint8Array(x))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
 const un64=x=>Uint8Array.from(atob(x.replace(/-/g,"+").replace(/_/g,"/")+"===".slice((x.length+3)%4)),c=>c.charCodeAt(0));
 async function mac(secret,x){let k=await crypto.subtle.importKey("raw",te.encode(secret),{name:"HMAC",hash:"SHA-256"},false,["sign"]);return b64(await crypto.subtle.sign("HMAC",k,te.encode(x)))}
-async function hash(p,s=b64(crypto.getRandomValues(new Uint8Array(16)))){let k=await crypto.subtle.importKey("raw",te.encode(p),"PBKDF2",false,["deriveBits"]);let z=await crypto.subtle.deriveBits({name:"PBKDF2",salt:un64(s),iterations:150000,hash:"SHA-256"},k,256);return s+"."+b64(z)}
+// Cloudflare Workers WebCrypto supports PBKDF2 iteration counts up to 100,000.
+async function hash(p,s=b64(crypto.getRandomValues(new Uint8Array(16)))){let k=await crypto.subtle.importKey("raw",te.encode(p),"PBKDF2",false,["deriveBits"]);let z=await crypto.subtle.deriveBits({name:"PBKDF2",salt:un64(s),iterations:100000,hash:"SHA-256"},k,256);return s+"."+b64(z)}
 async function session(u,env){let p=b64(te.encode(JSON.stringify({...u,exp:Date.now()+6048e5})));return p+"."+await mac(env.SESSION_SECRET,p)}
 async function who(r,env){let c=r.headers.get("Cookie")||"",v=c.split(";").map(x=>x.trim()).find(x=>x.startsWith("hizway="))?.slice(7);if(!v)return null;let [p,s]=v.split(".");if(!p||s!==await mac(env.SESSION_SECRET,p))return null;try{let u=JSON.parse(new TextDecoder().decode(un64(p)));return u.exp>Date.now()?u:null}catch{return null}}
 const ck=v=>`hizway=${v}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${v?604800:0}`;
