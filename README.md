@@ -1,107 +1,149 @@
-# Hizway Rentals — GitHub + Cloudflare portable project
+# HIZWAY RENTALS
 
-**Business:** Hizway Investment Ltd  
-**Frontend:** HTML, CSS, JavaScript  
-**Backend:** Cloudflare Workers (JavaScript)  
-**Database:** Cloudflare D1 (SQLite)  
-**Static assets:** Cloudflare Workers Static Assets
+**Hizway Investment Ltd** · Rental and property management workspace
 
-This repository is the Cloudflare edition of Hizway Rentals. GitHub stores and versions the source code; Cloudflare runs the application and database. **Do not deploy this project with GitHub Pages or Cloudflare Pages**: the API requires a Worker and a D1 binding.
+A deployable Cloudflare Workers application with a responsive browser interface, Cloudflare D1 database, account registration/login, and GitHub Actions deployment workflow.
 
-## 1. Requirements
+## Included in this build
 
-- A GitHub account and a Cloudflare account.
-- Node.js LTS on your Windows 11 PC.
-- A Cloudflare API token with permission to deploy Workers and manage D1.
+- Owner account registration and sign-in (PBKDF2 password hashing; signed, HTTP-only session cookie).
+- Dashboard with rent collection, active rent, occupancy, and unpaid-rent indicators.
+- Property, unit, tenant, lease, payment, expense, and maintenance registers.
+- Rent follow-up list and basic financial summary/print view.
+- Responsive interface using the supplied Hizway brand logo.
+- D1 migration and GitHub Actions workflow for Cloudflare Workers.
 
-## 2. Create the D1 database once
+## Technology
 
-Open PowerShell in this project folder:
+- Frontend: HTML, CSS, vanilla JavaScript
+- Backend: Cloudflare Workers (ES modules)
+- Database: Cloudflare D1 (SQLite)
+- Static assets: Workers Static Assets
+- Deployment: Wrangler CLI or GitHub Actions
 
-```powershell
+> This is a functional project foundation, not a certified accounting or property-management SaaS. SMS/WhatsApp delivery, online payment collection, staff roles, audit trails, full edit workflows, and production security review are not included yet. Test with sample data before entering real tenant or financial information.
+
+## Requirements
+
+- Node.js 20 or newer (Node.js 22 LTS recommended)
+- npm
+- Cloudflare account with Workers and D1 access
+- GitHub account if using automatic deployment
+
+## 1. Install dependencies
+
+Open a terminal in this project directory:
+
+```bash
 npm install
 npx wrangler login
+```
+
+## 2. Create the D1 database
+
+Run this once:
+
+```bash
 npx wrangler d1 create hizway-rentals-db
 ```
 
-Copy the `database_id` returned by Cloudflare. Open `wrangler.jsonc` and replace `REPLACE_WITH_DATABASE_ID` with that ID. Commit this updated config to GitHub; the database ID is an identifier, not a password.
+Cloudflare prints a `database_id`. Open `wrangler.jsonc` and replace `REPLACE_WITH_DATABASE_ID` with that exact ID. Do not change the database name or binding unless you also update the commands and workflow.
 
-## 3. Set the session secret
+## 3. Configure the session secret
 
-```powershell
+Generate a long random secret (at least 32 characters) and store it directly on the Worker:
+
+```bash
 npx wrangler secret put SESSION_SECRET
 ```
 
-Enter a long, random secret when prompted. Do not commit this secret to GitHub or put it in `wrangler.jsonc`.
+Do not put this secret in GitHub source code, `wrangler.jsonc`, or a committed `.dev.vars` file. For local development, create a local `.dev.vars` file containing:
 
-## 4. Create the database tables
-
-```powershell
-npx wrangler d1 migrations apply hizway-rentals-db --remote
+```text
+SESSION_SECRET=replace-with-a-random-secret-of-at-least-32-characters
 ```
 
-## 5. Test locally
+`.dev.vars` is ignored by Git.
 
-```powershell
+## 4. Apply the database migration
+
+For the remote production database:
+
+```bash
+npm run db:migrate
+```
+
+For a local development database:
+
+```bash
+npm run db:migrate:local
+```
+
+## 5. Run and check locally
+
+```bash
+npm run check
 npm run dev
 ```
 
-Open the local URL shown by Wrangler. Register an account and test the application before publishing it.
+Open the local address printed by Wrangler. Register an owner account and test the application with sample properties, units, tenants, leases, payments, expenses, and maintenance records.
 
-## 6. Upload the project to GitHub
+## 6. Deploy manually
 
-Create a new **private** GitHub repository, for example `hizway-rentals`. In PowerShell, from this project folder:
+After the database ID and production `SESSION_SECRET` are configured:
 
-```powershell
+```bash
+npm run deploy
+```
+
+The Worker URL is shown by Wrangler after deployment. You can attach a custom domain to the Worker from the Cloudflare dashboard. This project uses Workers, not GitHub Pages.
+
+## 7. Upload to GitHub
+
+Create a repository (private is recommended), then from this project folder:
+
+```bash
 git init
 git add .
-git commit -m "Prepare Hizway Rentals for Cloudflare"
+git commit -m "Set up Hizway Rentals"
 git branch -M main
 git remote add origin https://github.com/YOUR-USERNAME/hizway-rentals.git
 git push -u origin main
 ```
 
-Replace `YOUR-USERNAME` with your GitHub username. Keep the repository private because it contains application source code. Never commit passwords, API tokens, `.dev.vars`, or production secrets.
+Replace `YOUR-USERNAME` with your GitHub username. Never commit `.dev.vars`, passwords, or API tokens.
 
-## 7. Enable automatic deployment from GitHub
+## 8. Enable automatic GitHub deployment
 
-In Cloudflare, create an API token with the permissions needed to deploy Workers and access D1. In GitHub open:
+In GitHub, open **Repository → Settings → Secrets and variables → Actions** and add:
 
-**Repository → Settings → Secrets and variables → Actions → New repository secret**
-
-Add these two repository secrets:
-
-- `CLOUDFLARE_API_TOKEN` — your Cloudflare API token.
+- `CLOUDFLARE_API_TOKEN` — API token permitted to deploy the Worker and access the D1 database.
 - `CLOUDFLARE_ACCOUNT_ID` — your Cloudflare account ID.
 
-The included `.github/workflows/deploy.yml` applies D1 migrations and deploys the Worker whenever you push to `main`, or when you manually run the workflow from the Actions tab.
+The workflow in `.github/workflows/deploy.yml` applies migrations and deploys on pushes to `main` and on manual workflow dispatch. The D1 database must already exist and `wrangler.jsonc` must contain its real ID. Set `SESSION_SECRET` on the Worker before users sign in.
 
-The first deployment requires the D1 database to exist and `wrangler.jsonc` to contain its real database ID. Set `SESSION_SECRET` directly on the Worker with the command in step 3 before using account login. Cloudflare keeps this secret on the Worker; it does not need to be a GitHub secret.
+## Project layout
 
-## 8. Your live application
+```text
+├── .github/workflows/deploy.yml  # GitHub Actions deployment
+├── migrations/                  # D1 SQL migrations
+├── public/                      # Browser app and brand assets
+│   ├── assets/app.css
+│   ├── assets/app.js
+│   ├── assets/hizway-logo.png
+│   └── index.html
+├── src/index.js                 # Worker API and session handling
+├── package.json
+└── wrangler.jsonc                # Worker, assets, and D1 binding
+```
 
-After deployment, Wrangler/GitHub Actions will show the Worker URL, normally:
+## Important next development milestones
 
-`https://hizway-rentals.<your-subdomain>.workers.dev`
+1. Complete create/read/update/delete workflows and validation for every register.
+2. Strengthen tenant/lease/payment relationship checks and add audit logs.
+3. Implement accurate month-by-month rent allocation, partial payments, arrears, and lease expiry rules.
+4. Add receipt generation and downloadable PDF/CSV reports.
+5. Add scheduled reminders through a selected SMS/WhatsApp provider.
+6. Add staff accounts/permissions, backup/restore procedures, and a security/privacy review.
 
-You can attach a custom domain later from the Cloudflare Workers & Pages dashboard. Configure the domain on the Worker, not GitHub Pages.
-
-## What is included
-
-- Owner account registration and login
-- Dashboard and basic rent totals
-- Properties and units
-- Tenants and leases
-- Manual rent-payment recording
-- Outstanding-rent follow-up list
-- Expenses
-- Maintenance requests
-- Basic financial totals/report view
-- Responsive dark-green/mint interface and Hizway logo
-- D1 schema migration and GitHub Actions deployment workflow
-
-## Important limits before real customers use it
-
-This is a deployable conversion/starter, not a production-certified multi-landlord SaaS. The code still needs a full security and functional review, automated tests, role-based staff access, platform super-admin, tenant portal, record editing workflows, audit logs, reliable arrears/accounting rules, backups/restore testing, and privacy/legal review. It does not send SMS/WhatsApp reminders or process online payments. Do not store real tenant identity or financial records until the security review and backup plan are complete.
-
-The original PHP/MySQL database cannot be imported directly into D1. D1 is SQLite-based; this project includes its own D1 migration in `migrations/0001_initial.sql`.
+The existing schema is a fresh D1 schema. It does not import an existing MySQL/PHP database automatically.
