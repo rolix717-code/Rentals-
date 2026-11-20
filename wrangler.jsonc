@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "hizway-rentals-db",
-      "database_id": "REPLACE_WITH_DATABASE_ID",
+      "database_id": "a54a9631-89af-4266-8ee4-b56a64375909",
       "migrations_dir": "migrations"
     }
   ]
